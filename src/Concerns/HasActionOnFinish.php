@@ -20,9 +20,11 @@ trait HasActionOnFinish
 
     public function doRunOnSuccess()
     {
-        $closure = $this->runOnSuccess;
+        if ($this->runOnSuccess !== false) {
+            return ($this->runOnSuccess)();
+        }
 
-        return $closure();
+        return null;
     }
 
     public function runOnFail(bool|Closure $fn): static
@@ -34,8 +36,10 @@ trait HasActionOnFinish
 
     public function doRunOnFail()
     {
-        $closure = $this->runOnFail;
+        if ($this->runOnFail !== false) {
+            return ($this->runOnFail)();
+        }
 
-        return $closure();
+        return null;
     }
 }
