@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Konnco\FilamentImport\Actions\ImportField;
 use Konnco\FilamentImport\Concerns\HasActionMutation;
+use Konnco\FilamentImport\Concerns\HasActionOnFinish;
 use Konnco\FilamentImport\Concerns\HasActionUniqueField;
 use Konnco\FilamentImport\Concerns\HasTemporaryDisk;
 use Maatwebsite\Excel\Concerns\Importable;
@@ -21,6 +22,7 @@ class Import
 {
     use Importable;
     use HasActionMutation;
+    use HasActionOnFinish;
     use HasActionUniqueField;
     use HasTemporaryDisk;
 
@@ -240,6 +242,7 @@ class Import
             });
 
             if ($importSuccess) {
+                $this->doRunOnSuccess();
                 Notification::make()
                     ->success()
                     ->title(trans('filament-import::actions.import_succeeded_title'))
@@ -249,6 +252,7 @@ class Import
             }
 
             if (!$importSuccess) {
+                $this->doRunOnFail();
                 Notification::make()
                     ->danger()
                     ->title(trans('filament-import::actions.import_failed_title'))
@@ -257,6 +261,7 @@ class Import
                     ->send();
             }
         } catch (\Exception $e) {
+            $this->doRunOnFail();
             Notification::make()
                 ->danger()
                 ->title('Error importing file')

@@ -14,6 +14,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Toggle;
 use Konnco\FilamentImport\Concerns\HasActionMutation;
 use Konnco\FilamentImport\Concerns\HasActionUniqueField;
+use Konnco\FilamentImport\Concerns\HasActionOnFinish;
 use Konnco\FilamentImport\Concerns\HasTemporaryDisk;
 use Konnco\FilamentImport\Import;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
@@ -23,6 +24,7 @@ class ImportAction extends Action
 {
     use CanCustomizeProcess;
     use HasActionMutation;
+    use HasActionOnFinish;
     use HasActionUniqueField;
     use HasTemporaryDisk;
     use Importable;
@@ -75,6 +77,8 @@ class ImportAction extends Action
                     ->rowsLimit($this->rowsLimit)
                     ->mutateBeforeCreate($this->mutateBeforeCreate)
                     ->mutateAfterCreate($this->mutateAfterCreate)
+                    ->runOnSuccess($this->runOnSuccess)
+                    ->runOnFail($this->runOnFail)
                     ->handleRecordCreation($this->handleRecordCreation)
                     ->execute();
             });
