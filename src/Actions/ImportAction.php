@@ -37,6 +37,8 @@ class ImportAction extends Action
 
     protected ?Closure $handleRecordCreation = null;
 
+    protected ?int $rowsLimit = null;
+
     public static function getDefaultName(): ?string
     {
         return 'import';
@@ -186,6 +188,13 @@ class ImportAction extends Action
     {
         $this->handleRecordCreation = $closure;
         $this->massCreate(false);
+
+        return $this;
+    }
+
+    public function rowsLimit(?int $rows): static
+    {
+        $this->rowsLimit = $rows;
 
         return $this;
     }

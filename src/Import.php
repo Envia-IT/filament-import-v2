@@ -19,10 +19,10 @@ use Maatwebsite\Excel\Concerns\Importable;
 
 class Import
 {
+    use Importable;
     use HasActionMutation;
     use HasActionUniqueField;
     use HasTemporaryDisk;
-    use Importable;
 
     protected string $spreadsheet;
 
@@ -41,6 +41,7 @@ class Import
     protected bool $shouldHandleBlankRows = false;
 
     protected ?Closure $handleRecordCreation = null;
+    protected ?int $rowsLimit = null;
 
     public static function make(string $spreadsheetFilePath): self
     {
@@ -104,11 +105,26 @@ class Import
         return $this;
     }
 
+    public function rowsLimit(?int $rows = null): static
+    {
+        $this->rowsLimit = $rows;
+
+        return $this;
+    }
+
+    /**
+     * @throws \Exception
+     */
     public function getSpreadsheetData(): Collection
     {
         $data = $this->toCollection($this->temporaryDiskIsRemote() ? $this->spreadsheet : new UploadedFile(Storage::disk($this->disk)->path($this->spreadsheet), $this->spreadsheet))
             ->first()
             ->skip((int) $this->shouldSkipHeader);
+
+        if ($this->rowsLimit && $data->count() > $this->rowsLimit) {
+            throw new \Exception('The import file is too large. The maximum number of rows allowed is ' . $this->rowsLimit . '.');
+        }
+
         if (! $this->shouldHandleBlankRows) {
             return $data;
         }
@@ -149,94 +165,102 @@ class Import
 
     public function execute()
     {
-        $importSuccess = true;
-        $skipped = 0;
-        DB::transaction(function () use (&$importSuccess, &$skipped) {
-            foreach ($this->getSpreadsheetData() as $line => $row) {
-                $prepareInsert = collect([]);
-                $rules = [];
-                $validationMessages = [];
+        try {
+            $importSuccess = true;
+            $skipped = 0;
+            DB::transaction(function () use (&$importSuccess, &$skipped) {
+                foreach ($this->getSpreadsheetData() as $line => $row) {
+                    $prepareInsert = collect([]);
+                    $rules = [];
+                    $validationMessages = [];
 
-                foreach (Arr::dot($this->fields) as $key => $value) {
-                    $field = $this->formSchemas[$key];
-                    $fieldValue = $value;
+                    foreach (Arr::dot($this->fields) as $key => $value) {
+                        $field = $this->formSchemas[$key];
+                        $fieldValue = $value;
 
-                    if ($field instanceof ImportField) {
-                        // check if field is optional
-                        if (! $field->isRequired() && blank(@$row[$value])) {
-                            continue;
+                        if ($field instanceof ImportField) {
+                            // check if field is optional
+                            if (!$field->isRequired() && blank(@$row[$value])) {
+                                continue;
+                            }
+
+                            $fieldValue = $field->doMutateBeforeCreate($row[$value], collect($row)) ?? $row[$value];
+                            $rules[$key] = $field->getValidationRules();
+                            if (count($field->getCustomValidationMessages())) {
+                                $validationMessages[$key] = $field->getCustomValidationMessages();
+                            }
                         }
 
-                        $fieldValue = $field->doMutateBeforeCreate($row[$value], collect($row)) ?? $row[$value];
-                        $rules[$key] = $field->getValidationRules();
-                        if (count($field->getCustomValidationMessages())) {
-                            $validationMessages[$key] = $field->getCustomValidationMessages();
-                        }
+                        $prepareInsert[$key] = $fieldValue;
                     }
 
-                    $prepareInsert[$key] = $fieldValue;
-                }
+                    $prepareInsert = $this->validated(data: Arr::undot($prepareInsert), rules: $rules, customMessages: $validationMessages, line: $line + 1);
 
-                $prepareInsert = $this->validated(data: Arr::undot($prepareInsert), rules: $rules, customMessages: $validationMessages, line: $line + 1);
-
-                if (! $prepareInsert) {
-                    DB::rollBack();
-                    $importSuccess = false;
-
-                    break;
-                }
-
-                $prepareInsert = $this->doMutateBeforeCreate($prepareInsert);
-
-                if ($this->uniqueField !== false) {
-                    if (is_null($prepareInsert[$this->uniqueField] ?? null)) {
+                    if (!$prepareInsert) {
                         DB::rollBack();
                         $importSuccess = false;
 
                         break;
                     }
 
-                    $exists = (new $this->model)->where($this->uniqueField, $prepareInsert[$this->uniqueField] ?? null)->first();
-                    if ($exists instanceof $this->model) {
-                        $skipped++;
+                    $prepareInsert = $this->doMutateBeforeCreate($prepareInsert);
 
-                        continue;
+                    if ($this->uniqueField !== false) {
+                        if (is_null($prepareInsert[$this->uniqueField] ?? null)) {
+                            DB::rollBack();
+                            $importSuccess = false;
+
+                            break;
+                        }
+
+                        $exists = (new $this->model)->where($this->uniqueField, $prepareInsert[$this->uniqueField] ?? null)->first();
+                        if ($exists instanceof $this->model) {
+                            $skipped++;
+
+                            continue;
+                        }
                     }
-                }
 
-                if (! $this->handleRecordCreation) {
-                    if (! $this->shouldMassCreate) {
-                        $model = (new $this->model)->fill($prepareInsert);
-                        $model = tap($model, function ($instance) {
-                            $instance->save();
-                        });
+                    if (!$this->handleRecordCreation) {
+                        if (!$this->shouldMassCreate) {
+                            $model = (new $this->model)->fill($prepareInsert);
+                            $model = tap($model, function ($instance) {
+                                $instance->save();
+                            });
+                        } else {
+                            $model = $this->model::create($prepareInsert);
+                        }
                     } else {
-                        $model = $this->model::create($prepareInsert);
+                        $closure = $this->handleRecordCreation;
+                        $model = $closure($prepareInsert);
                     }
-                } else {
-                    $closure = $this->handleRecordCreation;
-                    $model = $closure($prepareInsert);
+
+                    $this->doMutateAfterCreate($model, $prepareInsert);
                 }
+            });
 
-                $this->doMutateAfterCreate($model, $prepareInsert);
+            if ($importSuccess) {
+                Notification::make()
+                    ->success()
+                    ->title(trans('filament-import::actions.import_succeeded_title'))
+                    ->body(trans('filament-import::actions.import_succeeded', ['count' => count($this->getSpreadsheetData()), 'skipped' => $skipped]))
+                    ->persistent()
+                    ->send();
             }
-        });
 
-        if ($importSuccess) {
-            Notification::make()
-                ->success()
-                ->title(trans('filament-import::actions.import_succeeded_title'))
-                ->body(trans('filament-import::actions.import_succeeded', ['count' => count($this->getSpreadsheetData()), 'skipped' => $skipped]))
-                ->persistent()
-                ->send();
-        }
-
-        if (! $importSuccess) {
+            if (!$importSuccess) {
+                Notification::make()
+                    ->danger()
+                    ->title(trans('filament-import::actions.import_failed_title'))
+                    ->body(trans('filament-import::actions.import_failed'))
+                    ->persistent()
+                    ->send();
+            }
+        } catch (\Exception $e) {
             Notification::make()
                 ->danger()
-                ->title(trans('filament-import::actions.import_failed_title'))
-                ->body(trans('filament-import::actions.import_failed'))
-                ->persistent()
+                ->title('Error importing file')
+                ->body($e->getMessage())
                 ->send();
         }
     }
