@@ -24,7 +24,7 @@ trait HasActionOnFinish
             return ($this->runOnSuccess)();
         }
 
-        return null;
+        return fn() => null;
     }
 
     public function runOnFail(bool|Closure $fn): static
@@ -40,6 +40,6 @@ trait HasActionOnFinish
             return ($this->runOnFail)();
         }
 
-        return null;
+        return fn() => null;
     }
 }
