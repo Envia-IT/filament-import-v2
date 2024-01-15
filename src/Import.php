@@ -242,7 +242,6 @@ class Import
             });
 
             if ($importSuccess) {
-                $this->doRunOnSuccess();
                 Notification::make()
                     ->success()
                     ->title(trans('filament-import::actions.import_succeeded_title'))
@@ -261,7 +260,6 @@ class Import
                     ->send();
             }
         } catch (\Exception $e) {
-            $this->doRunOnFail();
             Notification::make()
                 ->danger()
                 ->title('Error importing file')
