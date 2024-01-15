@@ -72,6 +72,7 @@ class ImportAction extends Action
                     ->skipHeader((bool) $data['skipHeader'])
                     ->massCreate($this->shouldMassCreate)
                     ->handleBlankRows($this->shouldHandleBlankRows)
+                    ->rowsLimit($this->rowsLimit)
                     ->mutateBeforeCreate($this->mutateBeforeCreate)
                     ->mutateAfterCreate($this->mutateAfterCreate)
                     ->handleRecordCreation($this->handleRecordCreation)
@@ -95,6 +96,13 @@ class ImportAction extends Action
     public function handleBlankRows($shouldHandleBlankRows = false): static
     {
         $this->shouldHandleBlankRows = $shouldHandleBlankRows;
+
+        return $this;
+    }
+
+    public function rowsLimit(?int $rows): static
+    {
+        $this->rowsLimit = $rows;
 
         return $this;
     }
@@ -188,13 +196,6 @@ class ImportAction extends Action
     {
         $this->handleRecordCreation = $closure;
         $this->massCreate(false);
-
-        return $this;
-    }
-
-    public function rowsLimit(?int $rows): static
-    {
-        $this->rowsLimit = $rows;
 
         return $this;
     }
